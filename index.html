@@ -3,142 +3,124 @@
 <head>
     <meta charset="UTF-8">
     <meta name="viewport" content="width=device-width, initial-scale=1.0">
-    <title>WebRunner v1.6 (Modern)</title>
-    
-    <script type="importmap">
-    {
-        "imports": {
-            "react": "https://esm.sh/react@19",
-            "react-dom": "https://esm.sh/react-dom@19/client",
-            "lucide-react": "https://esm.sh/lucide-react"
-        }
-    }
-    </script>
-
-    <script src="https://cdn.tailwindcss.com/4.0.0"></script>
+    <title>WebRunner v1.7 (Stable)</title>
+    <script src="https://cdn.tailwindcss.com"></script>
     <script src="https://unpkg.com/@babel/standalone/babel.min.js"></script>
-    <script src="https://unpkg.com/lucide@latest"></script>
-
-    <style type="text/tailwindcss">
-        /* Tailwind v4の新しい@theme設定（最新ブラウザ向け） */
-        @theme {
-            --color-brand: #60a5fa;
-            --font-mono: "Fira Code", monospace;
-        }
-        body { @apply m-0 flex flex-col h-screen bg-slate-950 text-white overflow-hidden font-sans; }
-        #launcher { @apply p-3 px-5 flex items-center justify-between border-b border-slate-800 bg-slate-900/50 backdrop-blur-md; }
-        #log-window { @apply p-2 px-5 bg-black/40 font-mono text-xs text-slate-400 border-b border-slate-800 h-16 overflow-y-auto leading-relaxed; }
-        #display-area { @apply flex-grow relative bg-white m-3 rounded-xl overflow-hidden shadow-2xl shadow-blue-500/10; }
-        .success { @apply text-emerald-400; }
-        .error { @apply text-rose-400 font-bold; }
+    <style>
+        body { margin:0; background:#0f172a; color:#f8fafc; font-family:sans-serif; display:flex; flex-direction:column; height:100vh; }
+        header { padding:10px 20px; border-bottom:1px solid #334155; display:flex; align-items:center; gap:15px; background:#1e293b; }
+        #log { height:60px; background:#000; font-family:monospace; font-size:12px; padding:10px; overflow-y:auto; color:#94a3b8; border-bottom:1px solid #334155; }
+        main { flex-grow:1; margin:10px; background:#fff; border-radius:8px; overflow:hidden; position:relative; }
+        iframe { width:100%; height:100%; border:none; background:white; }
+        .error { color:#f87171; }
     </style>
 </head>
 <body>
 
-    <div id="launcher">
-        <div class="flex items-center gap-3">
-            <span class="font-black text-xl tracking-tighter">WebRunner <span class="text-brand">v1.6</span></span>
-            <span class="text-[10px] bg-slate-800 px-2 py-0.5 rounded text-slate-400 uppercase tracking-widest">Modern ESM</span>
-        </div>
-        <input type="file" id="fileInput" accept=".txt,.js,.jsx,.html" 
-               class="text-sm file:mr-4 file:py-1 file:px-4 file:rounded-full file:border-0 file:text-sm file:font-semibold file:bg-blue-600 file:text-white hover:file:bg-blue-500 cursor:pointer">
-    </div>
+<header>
+    <b style="font-size:1.2em;">WebRunner <span style="color:#60a5fa;">v1.7</span></b>
+    <input type="file" id="fileInput" accept=".html,.js,.jsx">
+</header>
 
-    <div id="log-window">READY: 最新ブラウザ環境を検出しました。</div>
+<div id="log">READY: ファイルを待機中...</div>
 
-    <div id="display-area">
-        <div id="react-root" class="h-full w-full"></div>
-        <iframe id="html-frame" class="hidden w-full h-full border-none"></iframe>
-    </div>
+<main id="container">
+    <iframe id="viewer"></iframe>
+</main>
 
-    <script type="module">
-        // ESM環境なので、ここ自体がモジュールとして動きます
-        import React from 'react';
-        import ReactDOM from 'react-dom';
-        import * as LucideReact from 'lucide-react';
+<script type="module">
+    const fileInput = document.getElementById('fileInput');
+    const log = document.getElementById('log');
+    const viewer = document.getElementById('viewer');
 
-        const logWindow = document.getElementById('log-window');
-        const reactRootElem = document.getElementById('react-root');
-        const htmlFrame = document.getElementById('html-frame');
-        let reactRoot = null;
+    function addLog(msg, isError = false) {
+        const div = document.createElement('div');
+        if (isError) div.className = 'error';
+        div.textContent = `[${new Date().toLocaleTimeString()}] ${msg}`;
+        log.appendChild(div);
+        log.scrollTop = log.scrollHeight;
+    }
 
-        function addLog(msg, isError = false) {
-            const time = new Date().toLocaleTimeString();
-            logWindow.innerHTML += `<div>[${time}] <span class="${isError?'error':'success'}">${msg}</span></div>`;
-            logWindow.scrollTop = logWindow.scrollHeight;
-        }
+    fileInput.addEventListener('change', async (e) => {
+        const file = e.target.files;
+        if (!file) return;
 
-        document.getElementById('fileInput').addEventListener('change', async (e) => {
-            const file = e.target.files;
-            if (!file) return;
+        addLog(`読込開始: ${file.name}`);
+        const rawCode = await file.text();
 
-            // クリーンアップ
-            if (reactRoot) { reactRoot.unmount(); reactRoot = null; }
-            reactRootElem.innerHTML = "";
-            htmlFrame.classList.add('hidden');
-            htmlFrame.srcdoc = "";
+        try {
+            let finalHtml = "";
 
-            addLog(`LOADING: ${file.name}`);
-            const code = await file.text();
-            
-            if (file.name.endsWith('.html') || code.trim().startsWith('<!')) {
-                renderAsHTML(code);
+            if (file.name.endsWith('.html')) {
+                finalHtml = rawCode;
             } else {
-                renderAsReact(code);
-            }
-        });
+                addLog("React/JSXを変換中...");
+                
+                // 1. import文を CDN(esm.sh) に自動書き換え
+                // 例: from 'react' -> from 'https://esm.sh/react'
+                const processedCode = rawCode.replace(
+                    /from\s+['"]([^'"]+)['"]/g, 
+                    (match, path) => {
+                        if (path.startsWith('http') || path.startsWith('.') || path.startsWith('/')) return match;
+                        return `from 'https://esm.sh/${path}'`;
+                    }
+                );
 
-        function renderAsHTML(code) {
-            htmlFrame.classList.remove('hidden');
-            htmlFrame.srcdoc = code;
-            addLog("HTML View Rendered.");
-        }
-
-        async function renderAsReact(code) {
-            try {
-                // Lucideアイコンをグローバル展開（JSX用）
-                Object.entries(LucideReact).forEach(([name, comp]) => {
-                    window[name] = comp;
-                });
-
-                addLog("TRANSPILING (Babel)...");
-                // 最新のReact 19/ESM対応トランスパイル
-                const { code: transformedCode } = Babel.transform(code, {
-                    presets: ['react', ['env', { targets: { esmodules: true } }]],
+                // 2. Babelでトランスパイル
+                const { code } = Babel.transform(processedCode, {
+                    presets: ['react', 'env'],
                     filename: 'app.jsx'
                 });
 
-                // Appの特定ロジック
-                const wrappedCode = transformedCode
-                    .replace(/export\s+default\s+function\s+/, 'function ')
-                    .replace(/export\s+default\s+/, 'const App = ');
+                // 3. 実行用のHTMLテンプレートを作成
+                finalHtml = `
+<!DOCTYPE html>
+<html>
+<head>
+    <meta charset="UTF-8">
+    <script src="https://cdn.tailwindcss.com"><\/script>
+    <script src="https://unpkg.com/lucide@latest"><\/script>
+</head>
+<body>
+    <div id="root"></div>
+    <script type="module">
+        import React from 'https://esm.sh/react@18';
+        import ReactDOM from 'https://esm.sh/react-dom@18/client';
+        
+        // 外部から読み込めるようにグローバルに配置
+        window.React = React;
+        window.ReactDOM = ReactDOM;
 
-                // 実行
-                const runner = new Function('React', 'ReactDOM', 'LucideReact', `
-                    const { useState, useEffect, useRef, useMemo, useCallback } = React;
-                    ${wrappedCode}
-                    return (typeof App !== 'undefined') ? App : null;
-                `);
-
-                const Component = runner(React, ReactDOM, LucideReact);
-                if (!Component) throw new Error("Could not find 'App' or 'export default'.");
-
-                reactRoot = ReactDOM.createRoot(reactRootElem);
-                reactRoot.render(React.createElement(Component));
-                
-                addLog("REACT APP STARTED SUCCESSFULLY.");
-                // Lucide (Vanilla用) スキャン
-                setTimeout(() => { if(window.lucide) lucide.createIcons(); }, 200);
-
-            } catch (err) {
-                addLog(`ERROR: ${err.message}`, true);
-                reactRootElem.innerHTML = `<div class="p-10 text-rose-500 font-mono text-sm leading-relaxed">
-                    <h1 class="text-2xl font-black mb-4 uppercase">Runtime Error</h1>
-                    <pre class="bg-rose-50 p-5 rounded-lg border border-rose-200 overflow-auto">${err.stack || err.message}</pre>
-                </div>`;
-            }
+        try {
+            ${code.replace('export default', 'const App =')}
+            
+            const root = ReactDOM.createRoot(document.getElementById('root'));
+            root.render(React.createElement(typeof App !== 'undefined' ? App : () => <div>Appが見つかりません</div>));
+            
+            // Lucideアイコンの自動適用
+            setTimeout(() => { if(window.lucide) lucide.createIcons(); }, 100);
+        } catch (err) {
+            document.body.innerHTML = \`<pre style="color:red;padding:20px;">\${err.stack}<\/pre>\`;
         }
-    </script>
+    <\/script>
+</body>
+</html>`;
+            }
+
+            // 4. Blob URLを作成してiframeに流し込む（これが一番確実）
+            const blob = new Blob([finalHtml], { type: 'text/html' });
+            const url = URL.createObjectURL(blob);
+            viewer.src = url;
+
+            addLog("レンダリング完了");
+
+        } catch (err) {
+            addLog(`エラー: ${err.message}`, true);
+            console.error(err);
+        }
+    });
+</script>
+
 </body>
 </html>
 
