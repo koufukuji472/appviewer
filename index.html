@@ -3,151 +3,139 @@
 <head>
     <meta charset="UTF-8">
     <meta name="viewport" content="width=device-width, initial-scale=1.0">
-    <title>Universal Web Runner v1.5</title>
-    <script src="https://unpkg.com/react@18/umd/react.production.min.js"></script>
-    <script src="https://unpkg.com/react-dom@18/umd/react-dom.production.min.js"></script>
-    <script src="https://unpkg.com/@babel/standalone/babel.min.js"></script>
-    <script src="https://cdn.tailwindcss.com"></script>
-    <script src="https://unpkg.com/lucide@latest"></script>
+    <title>WebRunner v1.6 (Modern)</title>
     
-    <style>
-        body { margin: 0; display: flex; flex-direction: column; height: 100vh; font-family: 'Inter', sans-serif; background: #0f172a; color: white; overflow: hidden; }
-        #launcher { padding: 10px 20px; display: flex; align-items: center; justify-content: space-between; border-bottom: 1px solid #334155; background: #1e293b; }
-        #log-window { padding: 8px 20px; background: #020617; font-family: 'Fira Code', monospace; font-size: 12px; color: #94a3b8; border-bottom: 1px solid #334155; height: 60px; overflow-y: auto; line-height: 1.5; }
-        #display-area { flex-grow: 1; position: relative; background: #ffffff; margin: 12px; border-radius: 12px; overflow: hidden; color: #333; box-shadow: 0 10px 15px -3px rgba(0, 0, 0, 0.1); }
-        iframe { width: 100%; height: 100%; border: none; }
-        .success { color: #4ade80; }
-        .error { color: #f87171; font-weight: bold; }
-        .system { color: #60a5fa; }
-        input[type="file"]::file-selector-button { background: #3b82f6; border: none; padding: 5px 15px; border-radius: 4px; color: white; cursor: pointer; margin-right: 10px; }
+    <script type="importmap">
+    {
+        "imports": {
+            "react": "https://esm.sh/react@19",
+            "react-dom": "https://esm.sh/react-dom@19/client",
+            "lucide-react": "https://esm.sh/lucide-react"
+        }
+    }
+    </script>
+
+    <script src="https://cdn.tailwindcss.com/4.0.0"></script>
+    <script src="https://unpkg.com/@babel/standalone/babel.min.js"></script>
+    <script src="https://unpkg.com/lucide@latest"></script>
+
+    <style type="text/tailwindcss">
+        /* Tailwind v4の新しい@theme設定（最新ブラウザ向け） */
+        @theme {
+            --color-brand: #60a5fa;
+            --font-mono: "Fira Code", monospace;
+        }
+        body { @apply m-0 flex flex-col h-screen bg-slate-950 text-white overflow-hidden font-sans; }
+        #launcher { @apply p-3 px-5 flex items-center justify-between border-b border-slate-800 bg-slate-900/50 backdrop-blur-md; }
+        #log-window { @apply p-2 px-5 bg-black/40 font-mono text-xs text-slate-400 border-b border-slate-800 h-16 overflow-y-auto leading-relaxed; }
+        #display-area { @apply flex-grow relative bg-white m-3 rounded-xl overflow-hidden shadow-2xl shadow-blue-500/10; }
+        .success { @apply text-emerald-400; }
+        .error { @apply text-rose-400 font-bold; }
     </style>
 </head>
 <body>
 
     <div id="launcher">
-        <div style="display:flex; align-items:center; gap:10px;">
-            <span style="font-weight:900; font-size:1.2rem; letter-spacing:-0.5px;">WebRunner <span style="color:#60a5fa;">v1.5</span></span>
+        <div class="flex items-center gap-3">
+            <span class="font-black text-xl tracking-tighter">WebRunner <span class="text-brand">v1.6</span></span>
+            <span class="text-[10px] bg-slate-800 px-2 py-0.5 rounded text-slate-400 uppercase tracking-widest">Modern ESM</span>
         </div>
-        <input type="file" id="fileInput" accept=".txt,.js,.jsx,.html">
+        <input type="file" id="fileInput" accept=".txt,.js,.jsx,.html" 
+               class="text-sm file:mr-4 file:py-1 file:px-4 file:rounded-full file:border-0 file:text-sm file:font-semibold file:bg-blue-600 file:text-white hover:file:bg-blue-500 cursor:pointer">
     </div>
 
-    <div id="log-window">システム待機中... ファイルを選択してください。</div>
+    <div id="log-window">READY: 最新ブラウザ環境を検出しました。</div>
 
     <div id="display-area">
-        <div id="react-root"></div>
-        <iframe id="html-frame" style="display:none;"></iframe>
+        <div id="react-root" class="h-full w-full"></div>
+        <iframe id="html-frame" class="hidden w-full h-full border-none"></iframe>
     </div>
 
-    <script type="text/babel">
-        // UI操作用のグローバル変数
-        const fileInput = document.getElementById('fileInput');
+    <script type="module">
+        // ESM環境なので、ここ自体がモジュールとして動きます
+        import React from 'react';
+        import ReactDOM from 'react-dom';
+        import * as LucideReact from 'lucide-react';
+
         const logWindow = document.getElementById('log-window');
         const reactRootElem = document.getElementById('react-root');
         const htmlFrame = document.getElementById('html-frame');
-        
         let reactRoot = null;
 
-        function addLog(msg, type = 'success') {
+        function addLog(msg, isError = false) {
             const time = new Date().toLocaleTimeString();
-            const colorClass = type === 'error' ? 'error' : (type === 'system' ? 'system' : 'success');
-            logWindow.innerHTML += `<div>[${time}] <span class="${colorClass}">${msg}</span></div>`;
+            logWindow.innerHTML += `<div>[${time}] <span class="${isError?'error':'success'}">${msg}</span></div>`;
             logWindow.scrollTop = logWindow.scrollHeight;
         }
 
-        fileInput.addEventListener('change', async (e) => {
+        document.getElementById('fileInput').addEventListener('change', async (e) => {
             const file = e.target.files;
             if (!file) return;
 
-            // 前回の状態をクリーンアップ
-            if (reactRoot) {
-                reactRoot.unmount();
-                reactRoot = null;
-            }
+            // クリーンアップ
+            if (reactRoot) { reactRoot.unmount(); reactRoot = null; }
             reactRootElem.innerHTML = "";
-            htmlFrame.style.display = "none";
+            htmlFrame.classList.add('hidden');
             htmlFrame.srcdoc = "";
 
-            addLog(`読込中: ${file.name}`, 'system');
-
-            try {
-                const code = await file.text();
-                const isHTML = file.name.endsWith('.html') || code.trim().toLowerCase().startsWith('<!doctype');
-
-                if (isHTML) {
-                    renderAsHTML(code);
-                } else {
-                    await renderAsReact(code);
-                }
-            } catch (err) {
-                addLog(`失敗: ${err.message}`, 'error');
+            addLog(`LOADING: ${file.name}`);
+            const code = await file.text();
+            
+            if (file.name.endsWith('.html') || code.trim().startsWith('<!')) {
+                renderAsHTML(code);
+            } else {
+                renderAsReact(code);
             }
         });
 
         function renderAsHTML(code) {
-            htmlFrame.style.display = "block";
+            htmlFrame.classList.remove('hidden');
             htmlFrame.srcdoc = code;
-            addLog("HTMLプレビューを表示しました");
+            addLog("HTML View Rendered.");
         }
 
         async function renderAsReact(code) {
             try {
-                // 1. Lucideアイコンをグローバル展開（JSXから直接 <Camera /> 等で呼べるようにする）
-                if (window.lucide) {
-                    Object.keys(window.lucide.icons).forEach(key => {
-                        window[key] = window.lucide.icons[key];
-                    });
-                }
+                // Lucideアイコンをグローバル展開（JSX用）
+                Object.entries(LucideReact).forEach(([name, comp]) => {
+                    window[name] = comp;
+                });
 
-                addLog("Babelトランスパイル中...", "system");
+                addLog("TRANSPILING (Babel)...");
+                // 最新のReact 19/ESM対応トランスパイル
+                const { code: transformedCode } = Babel.transform(code, {
+                    presets: ['react', ['env', { targets: { esmodules: true } }]],
+                    filename: 'app.jsx'
+                });
 
-                // 2. ブラウザで動かない import 構文を無効化
-                const cleanCode = code.replace(/import\s+.*?\s+from\s+['"].*?['"];?/g, '// $&');
-
-                // 3. Babel実行
-                const transformed = Babel.transform(cleanCode, {
-                    presets: ['react', ['env', { modules: false }]],
-                    filename: 'dynamic.jsx'
-                }).code;
-
-                // 4. 実行用ラッパーの構築
-                // export default を変数 App にキャプチャする
-                const processedCode = transformed
+                // Appの特定ロジック
+                const wrappedCode = transformedCode
                     .replace(/export\s+default\s+function\s+/, 'function ')
                     .replace(/export\s+default\s+/, 'const App = ');
 
-                addLog("コンポーネントを起動中...");
-
-                const runner = new Function('React', 'ReactDOM', `
-                    const { useState, useEffect, useRef, useMemo, useCallback, useReducer } = React;
-                    ${processedCode}
+                // 実行
+                const runner = new Function('React', 'ReactDOM', 'LucideReact', `
+                    const { useState, useEffect, useRef, useMemo, useCallback } = React;
+                    ${wrappedCode}
                     return (typeof App !== 'undefined') ? App : null;
                 `);
 
-                const ComponentToRender = runner(React, ReactDOM);
+                const Component = runner(React, ReactDOM, LucideReact);
+                if (!Component) throw new Error("Could not find 'App' or 'export default'.");
 
-                if (!ComponentToRender) {
-                    throw new Error("コード内に 'App' または 'export default' が見つかりませんでした。");
-                }
-
-                // 5. レンダリング実行
                 reactRoot = ReactDOM.createRoot(reactRootElem);
-                reactRoot.render(React.createElement(ComponentToRender));
+                reactRoot.render(React.createElement(Component));
                 
-                addLog("Reactアプリケーションが正常に起動しました！");
-
-                // Lucideアイコンのパース（少し遅延させて実行）
-                setTimeout(() => {
-                    if (window.lucide) window.lucide.createIcons();
-                }, 300);
+                addLog("REACT APP STARTED SUCCESSFULLY.");
+                // Lucide (Vanilla用) スキャン
+                setTimeout(() => { if(window.lucide) lucide.createIcons(); }, 200);
 
             } catch (err) {
-                addLog(`ランタイムエラー: ${err.message}`, 'error');
-                reactRootElem.innerHTML = `
-                    <div style="padding:40px; color:#ef4444; font-family:sans-serif;">
-                        <h2 style="font-weight:bold; font-size:1.5rem; margin-bottom:10px;">Render Error</h2>
-                        <pre style="background:#fef2f2; padding:15px; border-radius:8px; overflow:auto;">${err.stack || err.message}</pre>
-                    </div>
-                `;
+                addLog(`ERROR: ${err.message}`, true);
+                reactRootElem.innerHTML = `<div class="p-10 text-rose-500 font-mono text-sm leading-relaxed">
+                    <h1 class="text-2xl font-black mb-4 uppercase">Runtime Error</h1>
+                    <pre class="bg-rose-50 p-5 rounded-lg border border-rose-200 overflow-auto">${err.stack || err.message}</pre>
+                </div>`;
             }
         }
     </script>
