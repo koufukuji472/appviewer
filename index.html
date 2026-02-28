@@ -1,130 +1,251 @@
-<!DOCTYPE html>
-<html lang="ja">
-<head>
-    <meta charset="UTF-8">
-    <meta name="viewport" content="width=device-width, initial-scale=1.0">
-    <title>WebRunner v1.8 (Safari Proof)</title>
-    <script src="https://unpkg.com/@babel/standalone/babel.min.js"></script>
-    <script src="https://cdn.tailwindcss.com"></script>
-    <style>
-        body { margin:0; background:#0f172a; color:#f8fafc; font-family:sans-serif; display:flex; flex-direction:column; height:100vh; overflow:hidden; }
-        header { padding:10px 20px; border-bottom:1px solid #334155; display:flex; align-items:center; justify-content:space-between; background:#1e293b; }
-        #log { height:50px; background:#000; font-family:monospace; font-size:11px; padding:8px 20px; overflow-y:auto; color:#94a3b8; border-bottom:1px solid #334155; }
-        #container { flex-grow:1; margin:10px; background:#fff; border-radius:12px; overflow:hidden; }
-        iframe { width:100%; height:100%; border:none; }
-    </style>
-</head>
-<body>
+ import React, { useState, useRef, useEffect, useCallback } from "react";
+import {
+  FileUp,
+  Monitor,
+  ShieldCheck,
+  XCircle,
+  Info,
+  RefreshCw
+} from "lucide-react";
 
-<header>
-    <div style="font-weight:900;">WebRunner <span style="color:#60a5fa;">v1.8</span></div>
-    <input type="file" id="fileInput" accept=".html,.js,.jsx">
-</header>
+/**
+ * FileList から先頭ファイルを安全に取り出す。
+ * - FileList は配列ではない（ブラウザ実装依存で [0] が壊されやすい）
+ * - item(0) は FileList の公式APIであり、生成/編集ツールの誤最適化に強い
+ */
+function getFirstFile(files) {
+  if (!files) return null;
 
-<div id="log">READY: Safari互換モードで待機中...</div>
+  // FileList は item(index) を持つ（標準API）
+  if (typeof files.item === "function") {
+    return files.item(0);
+  }
 
-<main id="container">
-    <iframe id="viewer"></iframe>
-</main>
+  // 念のためのフォールバック（古い/特殊環境）
+  if (typeof files.length === "number" && files.length > 0) {
+    return files[0] ?? null;
+  }
 
-<script>
-    const fileInput = document.getElementById('fileInput');
-    const log = document.getElementById('log');
-    const viewer = document.getElementById('viewer');
+  return null;
+}
 
-    function addLog(msg, isError = false) {
-        const div = document.createElement('div');
-        if (isError) div.style.color = '#f87171';
-        div.textContent = `[${new Date().toLocaleTimeString()}] ${msg}`;
-        log.appendChild(div);
-        log.scrollTop = log.scrollHeight;
+/**
+ * HTMLファイルかどうかを安定判定
+ * - file.type は空のことがあるので拡張子も見る
+ */
+function isHtmlFile(file) {
+  if (!file) return false;
+
+  const name = (file.name || "").toLowerCase();
+  const byExt = name.endsWith(".html") || name.endsWith(".htm");
+  const byMime = (file.type || "").toLowerCase() === "text/html";
+
+  return byExt || byMime;
+}
+
+export default function App() {
+  const [appUrl, setAppUrl] = useState(null);
+  const [fileName, setFileName] = useState("");
+  const [error, setError] = useState("");
+
+  const fileInputRef = useRef(null);
+
+  // Blob URL の破棄（メモリリーク対策）
+  const revokeUrl = useCallback((url) => {
+    if (!url) return;
+    try {
+      URL.revokeObjectURL(url);
+    } catch {
+      // revokeObjectURL が例外を投げることは稀だけど、念のため握る
     }
+  }, []);
 
-    fileInput.addEventListener('change', async (e) => {
-        const file = e.target.files;
-        if (!file) return;
+  // アンマウント時に破棄
+  useEffect(() => {
+    return () => {
+      revokeUrl(appUrl);
+    };
+  }, [appUrl, revokeUrl]);
 
-        addLog(`読込: ${file.name}`);
-        const rawCode = await file.text();
+  const handleFileChange = useCallback(
+    (e) => {
+      const files = e.target?.files;
+      const file = getFirstFile(files);
 
+      // ファイルが取れなければ何もしない
+      if (!file) return;
+
+      setError("");
+
+      if (!isHtmlFile(file)) {
+        setError("HTML形式のファイル（.html / .htm）を選択してください。");
+        setFileName("");
+        revokeUrl(appUrl);
+        setAppUrl(null);
+        if (fileInputRef.current) fileInputRef.current.value = "";
+        return;
+      }
+
+      setFileName(file.name);
+
+      const reader = new FileReader();
+
+      reader.onload = (event) => {
         try {
-            if (file.name.endsWith('.html')) {
-                viewer.srcdoc = rawCode;
-                addLog("HTMLを表示しました");
-                return;
-            }
+          const content = event.target?.result;
 
-            addLog("Babelトランスパイル中...");
+          // content が文字列以外（念のため）なら弾く
+          if (typeof content !== "string") {
+            throw new Error("FileReader result is not a string.");
+          }
 
-            // 1. import文を完全に削除（Safariのモジュールエラー対策）
-            const noImportCode = rawCode.replace(/import\s+.*?\s+from\s+['"].*?['"];?/g, '');
+          // 古いURLを破棄してから新規生成
+          revokeUrl(appUrl);
 
-            // 2. BabelでJSX -> JS (ES5/ES6) に変換
-            const { code } = Babel.transform(noImportCode, {
-                presets: ['react'],
-                filename: 'app.jsx'
-            });
+          const blob = new Blob([content], { type: "text/html" });
+          const url = URL.createObjectURL(blob);
 
-            // 3. export default を変数 App に変換
-            const runnerCode = code
-                .replace(/export\s+default\s+function\s+([A-Z][A-Za-z0-9]*)/, 'function $1')
-                .replace(/export\s+default\s+/, 'var App = ');
-
-            // 4. iframeの中に流し込むHTMLを作成
-            // 全ての依存関係を UMD (Global変数) 形式で読み込む
-            const sandboxHtml = `
-<!DOCTYPE html>
-<html>
-<head>
-    <meta charset="UTF-8">
-    <script src="https://cdn.tailwindcss.com"><\/script>
-    <script src="https://unpkg.com/react@18/umd/react.production.min.js"><\/script>
-    <script src="https://unpkg.com/react-dom@18/umd/react-dom.production.min.js"><\/script>
-    <script src="https://unpkg.com/lucide@latest"><\/script>
-</head>
-<body style="margin:0;">
-    <div id="root"></div>
-    <script>
-        (function() {
-            try {
-                const { useState, useEffect, useRef, useMemo, useCallback } = React;
-                
-                // Lucideアイコンをグローバルに展開
-                if (window.lucide) {
-                    Object.keys(window.lucide.icons).forEach(key => {
-                        window[key] = window.lucide.icons[key];
-                    });
-                }
-
-                // ユーザーコード実行
-                ${runnerCode}
-
-                // Appの起動
-                const Target = (typeof App !== 'undefined') ? App : null;
-                if (!Target) throw new Error("Appコンポーネントが見つかりませんでした。");
-
-                const root = ReactDOM.createRoot(document.getElementById('root'));
-                root.render(React.createElement(Target));
-
-                // Lucideアイコンの置換
-                setTimeout(() => { if(window.lucide) lucide.createIcons(); }, 100);
-            } catch (err) {
-                document.body.innerHTML = '<pre style="color:red;padding:20px;white-space:pre-wrap;">' + err.message + '</pre>';
-            }
-        })();
-    <\/script>
-</body>
-</html>`;
-
-            viewer.srcdoc = sandboxHtml;
-            addLog("Reactアプリケーションを起動しました");
-
+          setAppUrl(url);
         } catch (err) {
-            addLog(`変換エラー: ${err.message}`, true);
+          console.error(err);
+          setError("データの生成に失敗しました。");
         }
-    });
-</script>
+      };
 
-</body>
-</html>
+      reader.onerror = () => {
+        setError("ファイルの読み取り中にエラーが発生しました。");
+      };
 
+      reader.readAsText(file);
+    },
+    [appUrl, revokeUrl]
+  );
+
+  const handleReset = useCallback(() => {
+    revokeUrl(appUrl);
+    setAppUrl(null);
+    setFileName("");
+    setError("");
+    if (fileInputRef.current) fileInputRef.current.value = "";
+  }, [appUrl, revokeUrl]);
+
+  const openPicker = useCallback(() => {
+    fileInputRef.current?.click();
+  }, []);
+
+  return (
+    <div className="min-h-screen bg-slate-50 text-slate-900 font-sans p-4 md:p-8">
+      <div className="max-w-5xl mx-auto space-y-6">
+        <header className="text-center space-y-2">
+          <div className="inline-flex items-center justify-center p-3 bg-indigo-600 text-white rounded-2xl shadow-lg mb-4">
+            <Monitor size={32} />
+          </div>
+          <h1 className="text-3xl font-bold tracking-tight text-slate-800">
+            HTML App Viewer
+          </h1>
+          <p className="text-slate-500 max-w-md mx-auto">
+            ローカルのHTMLファイルを安全に実行・プレビューします。
+          </p>
+        </header>
+
+        <div className="bg-white p-6 rounded-2xl shadow-sm border border-slate-200 flex flex-col md:flex-row items-center justify-between gap-4">
+          <div className="flex items-center gap-3 w-full md:w-auto">
+            <input
+              type="file"
+              accept=".html,.htm,text/html"
+              ref={fileInputRef}
+              onChange={handleFileChange}
+              className="hidden"
+            />
+
+            <button
+              onClick={openPicker}
+              className="flex items-center justify-center gap-2 bg-indigo-600 hover:bg-indigo-700 text-white px-6 py-3 rounded-xl font-semibold transition-all active:scale-95 shadow-md shadow-indigo-100 w-full md:w-auto"
+            >
+              <FileUp size={20} />
+              ファイルを選択
+            </button>
+
+            {appUrl && (
+              <button
+                onClick={handleReset}
+                className="p-3 text-slate-400 hover:text-red-500 hover:bg-red-50 rounded-xl transition-colors flex items-center gap-2 text-sm font-medium"
+              >
+                <RefreshCw size={18} />
+                <span>終了</span>
+              </button>
+            )}
+          </div>
+
+          <div className="flex flex-col items-end gap-1 overflow-hidden w-full md:w-auto text-right">
+            {fileName ? (
+              <div className="flex items-center gap-2 bg-emerald-50 text-emerald-700 px-3 py-1 rounded-full text-sm font-medium border border-emerald-100 max-w-full">
+                <ShieldCheck size={14} className="shrink-0" />
+                <span className="truncate">{fileName}</span>
+              </div>
+            ) : (
+              <span className="text-slate-400 text-sm flex items-center gap-1">
+                <Info size={14} /> ファイル未選択
+              </span>
+            )}
+          </div>
+        </div>
+
+        {error && (
+          <div className="bg-red-50 border border-red-100 text-red-600 p-4 rounded-xl flex items-center gap-3 animate-in fade-in slide-in-from-top-2">
+            <XCircle size={20} />
+            <p className="font-medium text-sm">{error}</p>
+          </div>
+        )}
+
+        <div className="relative">
+          <div className="relative bg-slate-900 rounded-[2rem] overflow-hidden shadow-2xl border-[6px] border-slate-800 h-[600px] md:h-[700px] w-full flex flex-col">
+            <div className="h-10 bg-slate-800 flex items-center px-5 gap-2 shrink-0 border-b border-slate-700/50">
+              <div className="flex gap-1.5 mr-4">
+                <div className="w-3 h-3 rounded-full bg-rose-500/90 shadow-inner"></div>
+                <div className="w-3 h-3 rounded-full bg-amber-500/90 shadow-inner"></div>
+                <div className="w-3 h-3 rounded-full bg-emerald-500/90 shadow-inner"></div>
+              </div>
+              <div className="flex-1 flex justify-center mr-16">
+                <div className="bg-slate-900/50 px-4 py-1 rounded-md text-[11px] font-mono text-slate-400 truncate max-w-xs border border-slate-700/30 italic">
+                  {fileName || "standalone-sandbox"}
+                </div>
+              </div>
+            </div>
+
+            {appUrl ? (
+              <iframe
+                src={appUrl}
+                title="Sandbox"
+                className="w-full h-full bg-white border-none"
+                sandbox="allow-scripts allow-forms allow-same-origin allow-modals"
+              />
+            ) : (
+              <div className="flex-1 flex flex-col items-center justify-center text-slate-400 p-12 text-center space-y-6">
+                <div className="w-20 h-20 rounded-3xl bg-slate-800/80 flex items-center justify-center border border-slate-700 shadow-inner">
+                  <Monitor size={40} className="text-indigo-400 opacity-40" />
+                </div>
+                <div>
+                  <h3 className="text-xl font-semibold text-slate-200">
+                    ビューワー待機中
+                  </h3>
+                  <p className="text-sm text-slate-500 max-w-xs mx-auto mt-2">
+                    HTMLファイルを読み込むとここに表示されます。
+                  </p>
+                </div>
+              </div>
+            )}
+          </div>
+        </div>
+
+        <footer className="text-center text-slate-400 text-xs pb-8 flex flex-col items-center gap-2">
+          <div className="flex items-center gap-4 opacity-60 font-medium uppercase tracking-widest">
+            <span>Safe Local Execution</span>
+            <span>•</span>
+            <span>Zero Server Latency</span>
+          </div>
+        </footer>
+      </div>
+    </div>
+  );
+}
