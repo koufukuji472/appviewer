@@ -5,14 +5,10 @@
   <meta name="viewport" content="width=device-width,initial-scale=1,viewport-fit=cover" />
   <title>HTML App Viewer (Max)</title>
 
-  <!-- Tailwind (CDN) -->
   <script src="https://cdn.tailwindcss.com"></script>
-
-  <!-- lucide icons (CDN) -->
   <script src="https://unpkg.com/lucide@latest"></script>
 
   <style>
-    /* iOSのアドレスバー挙動に強い viewport 高さ */
     :root { --vh: 100vh; }
     body { height: var(--vh); }
   </style>
@@ -37,13 +33,11 @@
         <span>終了</span>
       </button>
 
-      <!-- filename (truncate) -->
       <div class="min-w-0 flex-1">
         <div class="text-xs text-slate-400 leading-none">Loaded</div>
         <div id="fileNameText" class="text-sm font-mono truncate text-slate-200">none</div>
       </div>
 
-      <!-- error badge -->
       <div id="errorBadge"
         class="hidden items-center gap-2 px-3 py-2 rounded-lg bg-rose-950/60 border border-rose-900 text-rose-200 text-xs font-semibold">
         <i data-lucide="alert-circle" class="w-4 h-4"></i>
@@ -52,7 +46,8 @@
     </div>
 
     <!-- Stage (almost fullscreen) -->
-    <div class="flex-1 min-h-0 bg-black">
+    <!-- ★ここに relative を付けるのが超重要 -->
+    <div class="flex-1 min-h-0 bg-black relative">
       <iframe id="sandboxFrame"
         class="w-full h-full bg-white border-none"
         title="Sandbox"
@@ -60,7 +55,7 @@
 
       <!-- placeholder overlay (only when no app) -->
       <div id="placeholder"
-        class="absolute inset-0 flex items-center justify-center bg-slate-950 text-slate-400">
+        class="z-10 absolute inset-0 flex items-center justify-center bg-slate-950 text-slate-400">
         <div class="text-center space-y-3 px-6">
           <div class="mx-auto w-12 h-12 rounded-2xl bg-slate-900 flex items-center justify-center border border-slate-800">
             <i data-lucide="monitor" class="w-6 h-6"></i>
@@ -76,20 +71,16 @@
   </div>
 
   <script>
-    // ---- viewport height fix (iOS Safari) ----
     function setVh() {
       document.documentElement.style.setProperty("--vh", window.innerHeight + "px");
     }
     setVh();
     window.addEventListener("resize", setVh);
 
-    // ---- lucide init ----
     if (window.lucide) window.lucide.createIcons();
 
-    // ---- state ----
     let appUrl = null;
 
-    // ---- elements ----
     const fileInput = document.getElementById("fileInput");
     const pickBtn = document.getElementById("pickBtn");
     const resetBtn = document.getElementById("resetBtn");
@@ -100,13 +91,11 @@
     const errorBadge = document.getElementById("errorBadge");
     const errorText = document.getElementById("errorText");
 
-    // ---- helpers ----
     function revokeUrl(url) {
       if (!url) return;
       try { URL.revokeObjectURL(url); } catch (_) {}
     }
 
-    // Canvas等に壊されにくい File 取得
     function getFirstFile(files) {
       if (!files) return null;
       if (typeof files.item === "function") return files.item(0);
@@ -156,7 +145,6 @@
       if (fileInput) fileInput.value = "";
     }
 
-    // ---- events ----
     pickBtn.addEventListener("click", () => fileInput.click());
     resetBtn.addEventListener("click", resetAll);
 
@@ -199,7 +187,6 @@
 
     window.addEventListener("beforeunload", () => revokeUrl(appUrl));
 
-    // init
     setIdleUI();
   </script>
 </body>
