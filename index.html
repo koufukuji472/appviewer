@@ -3,111 +3,123 @@
 <head>
     <meta charset="UTF-8">
     <meta name="viewport" content="width=device-width, initial-scale=1.0">
-    <title>Universal Web Runner v1.1</title>
+    <title>Universal Web Runner v1.2</title>
     <script src="https://unpkg.com/react@18/umd/react.production.min.js"></script>
     <script src="https://unpkg.com/react-dom@18/umd/react-dom.production.min.js"></script>
     <script src="https://unpkg.com/@babel/standalone/babel.min.js"></script>
     <script src="https://cdn.tailwindcss.com"></script>
     <script src="https://unpkg.com/lucide@latest"></script>
     <style>
-        body { margin: 0; display: flex; flex-direction: column; height: 100vh; font-family: sans-serif; background: #f1f5f9; }
-        #launcher { padding: 12px 20px; background: #0f172a; color: white; display: flex; align-items: center; gap: 15px; box-shadow: 0 4px 6px -1px rgb(0 0 0 / 0.1); }
-        #display-area { flex-grow: 1; position: relative; overflow: auto; background: white; margin: 10px; border-radius: 12px; border: 1px solid #e2e8f0; }
-        .status-badge { font-size: 0.75rem; padding: 4px 10px; border-radius: 9999px; font-weight: 700; background: #334155; }
+        body { margin: 0; display: flex; flex-direction: column; height: 100vh; font-family: sans-serif; background: #0f172a; color: white; }
+        #launcher { padding: 15px 20px; display: flex; align-items: center; gap: 15px; border-bottom: 1px solid #334155; }
+        #log-window { padding: 10px 20px; background: #1e293b; font-family: monospace; font-size: 0.75rem; color: #94a3b8; border-bottom: 1px solid #334155; max-height: 80px; overflow-y: auto; }
+        #display-area { flex-grow: 1; position: relative; background: #f8fafc; margin: 10px; border-radius: 12px; overflow: hidden; color: #333; }
         iframe { width: 100%; height: 100%; border: none; }
+        .success { color: #4ade80; }
+        .error { color: #f87171; font-weight: bold; }
     </style>
 </head>
 <body>
 
     <div id="launcher">
-        <span style="font-weight:900; letter-spacing:-0.05em;">WebRunner <span style="color:#60a5fa;">v1.1</span></span>
+        <span style="font-weight:900;">WebRunner <span style="color:#60a5fa;">v1.2</span></span>
         <input type="file" id="fileInput" accept=".txt,.js,.jsx,.html" style="font-size: 0.8rem;">
-        <div id="mode-status" class="status-badge">READY</div>
+        <button onclick="location.reload()" style="font-size: 0.7rem; background:#334155; padding:4px 8px; border-radius:4px;">リセット</button>
     </div>
 
+    <div id="log-window">システム待機中...</div>
+
     <div id="display-area">
-        <div id="react-root">
-            <div style="padding: 60px; text-align: center; color: #94a3b8;">
-                <p style="font-size: 1.2rem; font-weight: bold; margin-bottom: 10px;">ファイルを読み込んでください</p>
-                <p style="font-size: 0.9rem;">React (.js / .txt) または HTML (.html) に対応しています</p>
-            </div>
-        </div>
+        <div id="react-root"></div>
         <iframe id="html-frame" style="display:none;"></iframe>
     </div>
 
     <script>
         const fileInput = document.getElementById('fileInput');
-        const modeStatus = document.getElementById('mode-status');
+        const logWindow = document.getElementById('log-window');
         const reactRoot = document.getElementById('react-root');
         const htmlFrame = document.getElementById('html-frame');
 
-        // ライブラリ読み込みチェック
+        function addLog(msg, isError = false) {
+            const time = new Date().toLocaleTimeString();
+            const className = isError ? 'error' : 'success';
+            logWindow.innerHTML += `<div>[${time}] <span class="${className}">${msg}</span></div>`;
+            logWindow.scrollTop = logWindow.scrollHeight;
+        }
+
+        // ライブラリチェック
         window.onload = () => {
-            if (!window.Babel) {
-                alert("警告: 翻訳機(Babel)が読み込めていません。ネット接続を確認するか、Safari等のブラウザで開いてください。");
+            if (window.Babel && window.React) {
+                addLog("システム正常：React/Babel 読み込み完了");
+            } else {
+                addLog("致命的エラー：外部ライブラリがブロックされています。Safariで開いてください。", true);
             }
         };
 
         fileInput.addEventListener('change', async (e) => {
-            const file = e.target.files; // ←ここを修正しました！
+            const file = e.target.files;
             if (!file) return;
 
-            const code = await file.text();
-            const isHTML = code.trim().toLowerCase().startsWith('<!doctype') || code.includes('<html');
+            addLog(`ファイル検知: ${file.name}`);
+            
+            try {
+                const code = await file.text();
+                addLog(`テキスト読み込み完了 (${code.length} 文字)`);
 
-            if (isHTML) {
-                renderAsHTML(code);
-            } else {
-                renderAsReact(code);
+                const isHTML = code.trim().toLowerCase().startsWith('<!doctype') || code.includes('<html');
+
+                if (isHTML) {
+                    addLog("HTMLモードとして描画します...");
+                    renderAsHTML(code);
+                } else {
+                    addLog("Reactモードとして解析を開始...");
+                    renderAsReact(code);
+                }
+            } catch (err) {
+                addLog(`ファイル読込エラー: ${err.message}`, true);
             }
         });
 
         function renderAsHTML(code) {
-            modeStatus.innerText = "MODE: HTML";
-            modeStatus.style.color = "#60a5fa";
-            reactRoot.style.display = "none";
+            reactRoot.innerHTML = "";
             htmlFrame.style.display = "block";
             htmlFrame.srcdoc = code;
+            addLog("描画完了しました");
         }
 
         function renderAsReact(code) {
-            modeStatus.innerText = "MODE: REACT";
-            modeStatus.style.color = "#a78bfa";
             htmlFrame.style.display = "none";
-            reactRoot.style.display = "block";
-            reactRoot.innerHTML = "<div style='padding:20px; color:#64748b;'>翻訳中...</div>";
+            reactRoot.innerHTML = "解析中...";
 
             try {
-                // 不要なimport文を削除
+                addLog("JSXからJavaScriptへの翻訳を開始...");
                 const cleanCode = code.replace(/^import.*from.*;/gm, '');
                 
-                // JSXをJavaScriptに変換
                 const transformedCode = Babel.transform(cleanCode, { 
                     presets: ['react'] 
                 }).code;
+                addLog("翻訳成功。実行環境を構築中...");
 
-                // 実行環境の構築
                 const fullCode = `
                     const { useState, useEffect, useRef } = React;
                     const { ${Object.keys(Lucide).join(', ')} } = Lucide;
                     ${transformedCode}
+                    if (typeof App === 'undefined') {
+                        throw new Error("ファイル内に 'function App()' が見つかりません。");
+                    }
                     const root = ReactDOM.createRoot(document.getElementById('react-root'));
                     root.render(React.createElement(App));
                 `;
 
                 reactRoot.innerHTML = "";
-                // 実行！
                 new Function('React', 'ReactDOM', 'Lucide', fullCode)(React, ReactDOM, Lucide);
+                addLog("Reactアプリを起動しました");
                 
-                // アイコンの適用
                 setTimeout(() => { if(window.lucide) lucide.createIcons(); }, 100);
 
             } catch (err) {
-                reactRoot.innerHTML = `
-                    <div style="padding:20px; background:#fef2f2; border:1px solid #fee2e2; color:#b91c1c; border-radius:8px; margin:20px;">
-                        <h3 style="font-weight:bold; margin-bottom:5px;">Reactエラー</h3>
-                        <pre style="font-size:0.8rem; white-space:pre-wrap;">${err.message}</pre>
-                    </div>`;
+                addLog(`React解析エラー: ${err.message}`, true);
+                reactRoot.innerHTML = `<div style="padding:20px; color:red;">エラー詳細: ${err.message}</div>`;
             }
         }
     </script>
