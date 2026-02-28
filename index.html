@@ -3,47 +3,54 @@
 <head>
     <meta charset="UTF-8">
     <meta name="viewport" content="width=device-width, initial-scale=1.0">
-    <title>Universal Web Runner v1.4</title>
+    <title>Universal Web Runner v1.5</title>
     <script src="https://unpkg.com/react@18/umd/react.production.min.js"></script>
     <script src="https://unpkg.com/react-dom@18/umd/react-dom.production.min.js"></script>
     <script src="https://unpkg.com/@babel/standalone/babel.min.js"></script>
     <script src="https://cdn.tailwindcss.com"></script>
     <script src="https://unpkg.com/lucide@latest"></script>
+    
     <style>
-        body { margin: 0; display: flex; flex-direction: column; height: 100vh; font-family: sans-serif; background: #0f172a; color: white; }
-        #launcher { padding: 12px 20px; display: flex; align-items: center; gap: 15px; border-bottom: 1px solid #334155; }
-        #log-window { padding: 8px 20px; background: #1e293b; font-family: monospace; font-size: 11px; color: #94a3b8; border-bottom: 1px solid #334155; height: 50px; overflow-y: auto; }
-        #display-area { flex-grow: 1; position: relative; background: #ffffff; margin: 10px; border-radius: 8px; overflow: hidden; color: #333; }
+        body { margin: 0; display: flex; flex-direction: column; height: 100vh; font-family: 'Inter', sans-serif; background: #0f172a; color: white; overflow: hidden; }
+        #launcher { padding: 10px 20px; display: flex; align-items: center; justify-content: space-between; border-bottom: 1px solid #334155; background: #1e293b; }
+        #log-window { padding: 8px 20px; background: #020617; font-family: 'Fira Code', monospace; font-size: 12px; color: #94a3b8; border-bottom: 1px solid #334155; height: 60px; overflow-y: auto; line-height: 1.5; }
+        #display-area { flex-grow: 1; position: relative; background: #ffffff; margin: 12px; border-radius: 12px; overflow: hidden; color: #333; box-shadow: 0 10px 15px -3px rgba(0, 0, 0, 0.1); }
         iframe { width: 100%; height: 100%; border: none; }
         .success { color: #4ade80; }
         .error { color: #f87171; font-weight: bold; }
+        .system { color: #60a5fa; }
+        input[type="file"]::file-selector-button { background: #3b82f6; border: none; padding: 5px 15px; border-radius: 4px; color: white; cursor: pointer; margin-right: 10px; }
     </style>
 </head>
 <body>
 
     <div id="launcher">
-        <span style="font-weight:900;">WebRunner <span style="color:#60a5fa;">v1.4</span></span>
-        <input type="file" id="fileInput" accept=".txt,.js,.jsx,.html" style="font-size: 14px;">
+        <div style="display:flex; align-items:center; gap:10px;">
+            <span style="font-weight:900; font-size:1.2rem; letter-spacing:-0.5px;">WebRunner <span style="color:#60a5fa;">v1.5</span></span>
+        </div>
+        <input type="file" id="fileInput" accept=".txt,.js,.jsx,.html">
     </div>
 
-    <div id="log-window">システム待機中...</div>
+    <div id="log-window">システム待機中... ファイルを選択してください。</div>
 
     <div id="display-area">
         <div id="react-root"></div>
         <iframe id="html-frame" style="display:none;"></iframe>
     </div>
 
-    <script>
+    <script type="text/babel">
+        // UI操作用のグローバル変数
         const fileInput = document.getElementById('fileInput');
         const logWindow = document.getElementById('log-window');
         const reactRootElem = document.getElementById('react-root');
         const htmlFrame = document.getElementById('html-frame');
         
-        let reactRoot = null; // Reactのルートを保持
+        let reactRoot = null;
 
-        function addLog(msg, isError = false) {
+        function addLog(msg, type = 'success') {
             const time = new Date().toLocaleTimeString();
-            logWindow.innerHTML += `<div>[${time}] <span class="${isError?'error':'success'}">${msg}</span></div>`;
+            const colorClass = type === 'error' ? 'error' : (type === 'system' ? 'system' : 'success');
+            logWindow.innerHTML += `<div>[${time}] <span class="${colorClass}">${msg}</span></div>`;
             logWindow.scrollTop = logWindow.scrollHeight;
         }
 
@@ -51,7 +58,7 @@
             const file = e.target.files;
             if (!file) return;
 
-            // 前回の状態をリセット
+            // 前回の状態をクリーンアップ
             if (reactRoot) {
                 reactRoot.unmount();
                 reactRoot = null;
@@ -60,74 +67,87 @@
             htmlFrame.style.display = "none";
             htmlFrame.srcdoc = "";
 
-            addLog(`読込中: ${file.name}`);
+            addLog(`読込中: ${file.name}`, 'system');
+
             try {
                 const code = await file.text();
-                const isHTML = code.trim().toLowerCase().startsWith('<!doctype') || code.includes('<html');
+                const isHTML = file.name.endsWith('.html') || code.trim().toLowerCase().startsWith('<!doctype');
 
                 if (isHTML) {
                     renderAsHTML(code);
                 } else {
-                    renderAsReact(code);
+                    await renderAsReact(code);
                 }
-            } catch (err) { addLog(`失敗: ${err.message}`, true); }
+            } catch (err) {
+                addLog(`失敗: ${err.message}`, 'error');
+            }
         });
 
         function renderAsHTML(code) {
             htmlFrame.style.display = "block";
             htmlFrame.srcdoc = code;
-            addLog("HTML表示完了");
+            addLog("HTMLプレビューを表示しました");
         }
 
-        function renderAsReact(code) {
+        async function renderAsReact(code) {
             try {
-                // Gemini等の出力をブラウザで動く形に変換
-                let cleanCode = code
-                    .replace(/import\s+.*?\s+from\s+['"].*?['"];?/g, '') // import削除
-                    .replace(/export\s+default\s+function\s+/, 'function ') // export defaultを関数定義へ
-                    .replace(/export\s+default\s+/, 'const App = ');       // 無名関数等のexport対策
-
-                addLog("Babel翻訳中...");
-                const transformedCode = Babel.transform(cleanCode, { 
-                    presets: ['react'] 
-                }).code;
-
-                // 実行関数を生成
-                // 全てのフックとLucideコンポーネントをスコープ内に注入
-                const runner = new Function('React', 'ReactDOM', 'Lucide', `
-                    const { useState, useEffect, useRef, useMemo, useCallback } = React;
-                    // Lucideアイコンをグローバル展開（JSX内で <Camera /> のように書けるようにする）
-                    const LucideIcons = {};
-                    Object.keys(Lucide).forEach(key => {
-                        if (typeof Lucide[key] === 'function' || typeof Lucide[key] === 'object') {
-                            LucideIcons[key] = Lucide[key];
-                        }
+                // 1. Lucideアイコンをグローバル展開（JSXから直接 <Camera /> 等で呼べるようにする）
+                if (window.lucide) {
+                    Object.keys(window.lucide.icons).forEach(key => {
+                        window[key] = window.lucide.icons[key];
                     });
-
-                    // ユーザーコード実行
-                    ${transformedCode}
-                    
-                    // Appコンポーネントを探す
-                    const Target = (typeof App !== 'undefined') ? App : null;
-                    return Target;
-                `);
-
-                const ComponentToRender = runner(React, ReactDOM, Lucide);
-
-                if (!ComponentToRender) {
-                    throw new Error("コード内に 'App' という名前のコンポーネントが見つかりませんでした。");
                 }
 
+                addLog("Babelトランスパイル中...", "system");
+
+                // 2. ブラウザで動かない import 構文を無効化
+                const cleanCode = code.replace(/import\s+.*?\s+from\s+['"].*?['"];?/g, '// $&');
+
+                // 3. Babel実行
+                const transformed = Babel.transform(cleanCode, {
+                    presets: ['react', ['env', { modules: false }]],
+                    filename: 'dynamic.jsx'
+                }).code;
+
+                // 4. 実行用ラッパーの構築
+                // export default を変数 App にキャプチャする
+                const processedCode = transformed
+                    .replace(/export\s+default\s+function\s+/, 'function ')
+                    .replace(/export\s+default\s+/, 'const App = ');
+
+                addLog("コンポーネントを起動中...");
+
+                const runner = new Function('React', 'ReactDOM', `
+                    const { useState, useEffect, useRef, useMemo, useCallback, useReducer } = React;
+                    ${processedCode}
+                    return (typeof App !== 'undefined') ? App : null;
+                `);
+
+                const ComponentToRender = runner(React, ReactDOM);
+
+                if (!ComponentToRender) {
+                    throw new Error("コード内に 'App' または 'export default' が見つかりませんでした。");
+                }
+
+                // 5. レンダリング実行
                 reactRoot = ReactDOM.createRoot(reactRootElem);
                 reactRoot.render(React.createElement(ComponentToRender));
                 
-                addLog("React起動成功！");
-                // Lucideアイコンのパース待ち
-                setTimeout(() => { if(window.lucide) lucide.createIcons(); }, 100);
-                
+                addLog("Reactアプリケーションが正常に起動しました！");
+
+                // Lucideアイコンのパース（少し遅延させて実行）
+                setTimeout(() => {
+                    if (window.lucide) window.lucide.createIcons();
+                }, 300);
+
             } catch (err) {
-                addLog(`エラー: ${err.message}`, true);
-                reactRootElem.innerHTML = `<div style="padding:20px; color:red;">${err.message}</div>`;
+                addLog(`ランタイムエラー: ${err.message}`, 'error');
+                reactRootElem.innerHTML = `
+                    <div style="padding:40px; color:#ef4444; font-family:sans-serif;">
+                        <h2 style="font-weight:bold; font-size:1.5rem; margin-bottom:10px;">Render Error</h2>
+                        <pre style="background:#fef2f2; padding:15px; border-radius:8px; overflow:auto;">${err.stack || err.message}</pre>
+                    </div>
+                `;
             }
         }
     </script>
