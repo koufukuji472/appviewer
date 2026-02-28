@@ -3,46 +3,56 @@
 <head>
     <meta charset="UTF-8">
     <meta name="viewport" content="width=device-width, initial-scale=1.0">
-    <title>Universal Web Runner</title>
+    <title>Universal Web Runner v1.1</title>
     <script src="https://unpkg.com/react@18/umd/react.production.min.js"></script>
     <script src="https://unpkg.com/react-dom@18/umd/react-dom.production.min.js"></script>
     <script src="https://unpkg.com/@babel/standalone/babel.min.js"></script>
     <script src="https://cdn.tailwindcss.com"></script>
     <script src="https://unpkg.com/lucide@latest"></script>
     <style>
-        body { margin: 0; display: flex; flex-direction: column; height: 100vh; font-family: sans-serif; }
-        #launcher { padding: 15px; background: #1e293b; color: white; display: flex; align-items: center; gap: 15px; z-index: 100; }
-        #display-area { flex-grow: 1; position: relative; background: #f8fafc; overflow: auto; }
+        body { margin: 0; display: flex; flex-direction: column; height: 100vh; font-family: sans-serif; background: #f1f5f9; }
+        #launcher { padding: 12px 20px; background: #0f172a; color: white; display: flex; align-items: center; gap: 15px; box-shadow: 0 4px 6px -1px rgb(0 0 0 / 0.1); }
+        #display-area { flex-grow: 1; position: relative; overflow: auto; background: white; margin: 10px; border-radius: 12px; border: 1px solid #e2e8f0; }
+        .status-badge { font-size: 0.75rem; padding: 4px 10px; border-radius: 9999px; font-weight: 700; background: #334155; }
         iframe { width: 100%; height: 100%; border: none; }
-        .mode-badge { font-size: 0.7em; padding: 2px 8px; border-radius: 4px; font-weight: bold; }
     </style>
 </head>
 <body>
 
     <div id="launcher">
-        <span style="font-weight:bold; white-space:nowrap;">Web Runner</span>
-        <input type="file" id="fileInput" accept=".txt,.js,.jsx,.html" style="font-size: 0.8em;">
-        <div id="status" class="mode-badge"></div>
+        <span style="font-weight:900; letter-spacing:-0.05em;">WebRunner <span style="color:#60a5fa;">v1.1</span></span>
+        <input type="file" id="fileInput" accept=".txt,.js,.jsx,.html" style="font-size: 0.8rem;">
+        <div id="mode-status" class="status-badge">READY</div>
     </div>
 
     <div id="display-area">
-        <div id="react-root"></div>
-        <iframe id="html-frame" style="display:none;"></div>
+        <div id="react-root">
+            <div style="padding: 60px; text-align: center; color: #94a3b8;">
+                <p style="font-size: 1.2rem; font-weight: bold; margin-bottom: 10px;">ファイルを読み込んでください</p>
+                <p style="font-size: 0.9rem;">React (.js / .txt) または HTML (.html) に対応しています</p>
+            </div>
+        </div>
+        <iframe id="html-frame" style="display:none;"></iframe>
     </div>
 
     <script>
         const fileInput = document.getElementById('fileInput');
-        const statusEl = document.getElementById('status');
+        const modeStatus = document.getElementById('mode-status');
         const reactRoot = document.getElementById('react-root');
         const htmlFrame = document.getElementById('html-frame');
 
+        // ライブラリ読み込みチェック
+        window.onload = () => {
+            if (!window.Babel) {
+                alert("警告: 翻訳機(Babel)が読み込めていません。ネット接続を確認するか、Safari等のブラウザで開いてください。");
+            }
+        };
+
         fileInput.addEventListener('change', async (e) => {
-            const file = e.target.files;
+            const file = e.target.files; // ←ここを修正しました！
             if (!file) return;
 
             const code = await file.text();
-            
-            // --- 1. HTMLかReactかの自動判別 ---
             const isHTML = code.trim().toLowerCase().startsWith('<!doctype') || code.includes('<html');
 
             if (isHTML) {
@@ -52,31 +62,31 @@
             }
         });
 
-        // --- HTMLとして表示する処理 ---
         function renderAsHTML(code) {
-            statusEl.innerText = "MODE: HTML";
-            statusEl.style.background = "#3b82f6";
-            
-            reactRoot.innerHTML = ""; // Reactを消す
+            modeStatus.innerText = "MODE: HTML";
+            modeStatus.style.color = "#60a5fa";
+            reactRoot.style.display = "none";
             htmlFrame.style.display = "block";
-            
-            // iframeのsrcdocに流し込むことで、独立したページとして実行
             htmlFrame.srcdoc = code;
         }
 
-        // --- Reactとして表示する処理 ---
         function renderAsReact(code) {
-            statusEl.innerText = "MODE: REACT";
-            statusEl.style.background = "#8b5cf6";
-            
+            modeStatus.innerText = "MODE: REACT";
+            modeStatus.style.color = "#a78bfa";
             htmlFrame.style.display = "none";
-            reactRoot.innerHTML = "コンパイル中...";
+            reactRoot.style.display = "block";
+            reactRoot.innerHTML = "<div style='padding:20px; color:#64748b;'>翻訳中...</div>";
 
             try {
-                // Babelで翻訳
+                // 不要なimport文を削除
                 const cleanCode = code.replace(/^import.*from.*;/gm, '');
-                const transformedCode = Babel.transform(cleanCode, { presets: ['react'] }).code;
+                
+                // JSXをJavaScriptに変換
+                const transformedCode = Babel.transform(cleanCode, { 
+                    presets: ['react'] 
+                }).code;
 
+                // 実行環境の構築
                 const fullCode = `
                     const { useState, useEffect, useRef } = React;
                     const { ${Object.keys(Lucide).join(', ')} } = Lucide;
@@ -86,12 +96,21 @@
                 `;
 
                 reactRoot.innerHTML = "";
+                // 実行！
                 new Function('React', 'ReactDOM', 'Lucide', fullCode)(React, ReactDOM, Lucide);
-                lucide.createIcons();
+                
+                // アイコンの適用
+                setTimeout(() => { if(window.lucide) lucide.createIcons(); }, 100);
+
             } catch (err) {
-                reactRoot.innerHTML = `<div style="color:red; padding:20px;">Reactエラー: ${err.message}</div>`;
+                reactRoot.innerHTML = `
+                    <div style="padding:20px; background:#fef2f2; border:1px solid #fee2e2; color:#b91c1c; border-radius:8px; margin:20px;">
+                        <h3 style="font-weight:bold; margin-bottom:5px;">Reactエラー</h3>
+                        <pre style="font-size:0.8rem; white-space:pre-wrap;">${err.message}</pre>
+                    </div>`;
             }
         }
     </script>
 </body>
 </html>
+
