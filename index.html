@@ -3,7 +3,7 @@
 <head>
     <meta charset="UTF-8">
     <meta name="viewport" content="width=device-width, initial-scale=1.0">
-    <title>Universal Web Runner v1.2</title>
+    <title>Universal Web Runner v1.4</title>
     <script src="https://unpkg.com/react@18/umd/react.production.min.js"></script>
     <script src="https://unpkg.com/react-dom@18/umd/react-dom.production.min.js"></script>
     <script src="https://unpkg.com/@babel/standalone/babel.min.js"></script>
@@ -11,9 +11,9 @@
     <script src="https://unpkg.com/lucide@latest"></script>
     <style>
         body { margin: 0; display: flex; flex-direction: column; height: 100vh; font-family: sans-serif; background: #0f172a; color: white; }
-        #launcher { padding: 15px 20px; display: flex; align-items: center; gap: 15px; border-bottom: 1px solid #334155; }
-        #log-window { padding: 10px 20px; background: #1e293b; font-family: monospace; font-size: 0.75rem; color: #94a3b8; border-bottom: 1px solid #334155; max-height: 80px; overflow-y: auto; }
-        #display-area { flex-grow: 1; position: relative; background: #f8fafc; margin: 10px; border-radius: 12px; overflow: hidden; color: #333; }
+        #launcher { padding: 12px 20px; display: flex; align-items: center; gap: 15px; border-bottom: 1px solid #334155; }
+        #log-window { padding: 8px 20px; background: #1e293b; font-family: monospace; font-size: 11px; color: #94a3b8; border-bottom: 1px solid #334155; height: 50px; overflow-y: auto; }
+        #display-area { flex-grow: 1; position: relative; background: #ffffff; margin: 10px; border-radius: 8px; overflow: hidden; color: #333; }
         iframe { width: 100%; height: 100%; border: none; }
         .success { color: #4ade80; }
         .error { color: #f87171; font-weight: bold; }
@@ -22,9 +22,8 @@
 <body>
 
     <div id="launcher">
-        <span style="font-weight:900;">WebRunner <span style="color:#60a5fa;">v1.2</span></span>
-        <input type="file" id="fileInput" accept=".txt,.js,.jsx,.html" style="font-size: 0.8rem;">
-        <button onclick="location.reload()" style="font-size: 0.7rem; background:#334155; padding:4px 8px; border-radius:4px;">リセット</button>
+        <span style="font-weight:900;">WebRunner <span style="color:#60a5fa;">v1.4</span></span>
+        <input type="file" id="fileInput" accept=".txt,.js,.jsx,.html" style="font-size: 14px;">
     </div>
 
     <div id="log-window">システム待機中...</div>
@@ -37,89 +36,98 @@
     <script>
         const fileInput = document.getElementById('fileInput');
         const logWindow = document.getElementById('log-window');
-        const reactRoot = document.getElementById('react-root');
+        const reactRootElem = document.getElementById('react-root');
         const htmlFrame = document.getElementById('html-frame');
+        
+        let reactRoot = null; // Reactのルートを保持
 
         function addLog(msg, isError = false) {
             const time = new Date().toLocaleTimeString();
-            const className = isError ? 'error' : 'success';
-            logWindow.innerHTML += `<div>[${time}] <span class="${className}">${msg}</span></div>`;
+            logWindow.innerHTML += `<div>[${time}] <span class="${isError?'error':'success'}">${msg}</span></div>`;
             logWindow.scrollTop = logWindow.scrollHeight;
         }
-
-        // ライブラリチェック
-        window.onload = () => {
-            if (window.Babel && window.React) {
-                addLog("システム正常：React/Babel 読み込み完了");
-            } else {
-                addLog("致命的エラー：外部ライブラリがブロックされています。Safariで開いてください。", true);
-            }
-        };
 
         fileInput.addEventListener('change', async (e) => {
             const file = e.target.files;
             if (!file) return;
 
-            addLog(`ファイル検知: ${file.name}`);
-            
+            // 前回の状態をリセット
+            if (reactRoot) {
+                reactRoot.unmount();
+                reactRoot = null;
+            }
+            reactRootElem.innerHTML = "";
+            htmlFrame.style.display = "none";
+            htmlFrame.srcdoc = "";
+
+            addLog(`読込中: ${file.name}`);
             try {
                 const code = await file.text();
-                addLog(`テキスト読み込み完了 (${code.length} 文字)`);
-
                 const isHTML = code.trim().toLowerCase().startsWith('<!doctype') || code.includes('<html');
 
                 if (isHTML) {
-                    addLog("HTMLモードとして描画します...");
                     renderAsHTML(code);
                 } else {
-                    addLog("Reactモードとして解析を開始...");
                     renderAsReact(code);
                 }
-            } catch (err) {
-                addLog(`ファイル読込エラー: ${err.message}`, true);
-            }
+            } catch (err) { addLog(`失敗: ${err.message}`, true); }
         });
 
         function renderAsHTML(code) {
-            reactRoot.innerHTML = "";
             htmlFrame.style.display = "block";
             htmlFrame.srcdoc = code;
-            addLog("描画完了しました");
+            addLog("HTML表示完了");
         }
 
         function renderAsReact(code) {
-            htmlFrame.style.display = "none";
-            reactRoot.innerHTML = "解析中...";
-
             try {
-                addLog("JSXからJavaScriptへの翻訳を開始...");
-                const cleanCode = code.replace(/^import.*from.*;/gm, '');
-                
+                // Gemini等の出力をブラウザで動く形に変換
+                let cleanCode = code
+                    .replace(/import\s+.*?\s+from\s+['"].*?['"];?/g, '') // import削除
+                    .replace(/export\s+default\s+function\s+/, 'function ') // export defaultを関数定義へ
+                    .replace(/export\s+default\s+/, 'const App = ');       // 無名関数等のexport対策
+
+                addLog("Babel翻訳中...");
                 const transformedCode = Babel.transform(cleanCode, { 
                     presets: ['react'] 
                 }).code;
-                addLog("翻訳成功。実行環境を構築中...");
 
-                const fullCode = `
-                    const { useState, useEffect, useRef } = React;
-                    const { ${Object.keys(Lucide).join(', ')} } = Lucide;
+                // 実行関数を生成
+                // 全てのフックとLucideコンポーネントをスコープ内に注入
+                const runner = new Function('React', 'ReactDOM', 'Lucide', `
+                    const { useState, useEffect, useRef, useMemo, useCallback } = React;
+                    // Lucideアイコンをグローバル展開（JSX内で <Camera /> のように書けるようにする）
+                    const LucideIcons = {};
+                    Object.keys(Lucide).forEach(key => {
+                        if (typeof Lucide[key] === 'function' || typeof Lucide[key] === 'object') {
+                            LucideIcons[key] = Lucide[key];
+                        }
+                    });
+
+                    // ユーザーコード実行
                     ${transformedCode}
-                    if (typeof App === 'undefined') {
-                        throw new Error("ファイル内に 'function App()' が見つかりません。");
-                    }
-                    const root = ReactDOM.createRoot(document.getElementById('react-root'));
-                    root.render(React.createElement(App));
-                `;
+                    
+                    // Appコンポーネントを探す
+                    const Target = (typeof App !== 'undefined') ? App : null;
+                    return Target;
+                `);
 
-                reactRoot.innerHTML = "";
-                new Function('React', 'ReactDOM', 'Lucide', fullCode)(React, ReactDOM, Lucide);
-                addLog("Reactアプリを起動しました");
+                const ComponentToRender = runner(React, ReactDOM, Lucide);
+
+                if (!ComponentToRender) {
+                    throw new Error("コード内に 'App' という名前のコンポーネントが見つかりませんでした。");
+                }
+
+                reactRoot = ReactDOM.createRoot(reactRootElem);
+                reactRoot.render(React.createElement(ComponentToRender));
                 
+                addLog("React起動成功！");
+                // Lucideアイコンのパース待ち
                 setTimeout(() => { if(window.lucide) lucide.createIcons(); }, 100);
-
+                
             } catch (err) {
-                addLog(`React解析エラー: ${err.message}`, true);
-                reactRoot.innerHTML = `<div style="padding:20px; color:red;">エラー詳細: ${err.message}</div>`;
+                addLog(`エラー: ${err.message}`, true);
+                reactRootElem.innerHTML = `<div style="padding:20px; color:red;">${err.message}</div>`;
             }
         }
     </script>
